@@ -37,7 +37,7 @@ def lade_basiszeiten(uploaded_file):
     raster = sorted(list(alle_uhrzeiten))
     return basiszeiten, gesamter_plan, raster
 
-def check_valid(tag, zeit, dauer, team, plan, team_tage, wunsch_daten, basiszeiten, tage_index):
+def check_valid(tag, zeit, dauer, team, plan, team_tage, wunsch_daten, basiszeiten, tage_index, abstandsregel_aktiv):
     bloecke = dauer // 30
     if zeit not in basiszeiten[tag]: return False
     idx = basiszeiten[tag].index(zeit)
@@ -45,22 +45,25 @@ def check_valid(tag, zeit, dauer, team, plan, team_tage, wunsch_daten, basiszeit
     
     kandidaten = basiszeiten[tag][idx:idx+bloecke]
     
-    # Pruefen, ob die Bloecke direkt hintereinander liegen
     for j in range(1, bloecke):
         if basiszeiten[tag].index(kandidaten[j]) != idx + j:
             return False
             
-    # Pruefen auf Belegung und Sperrzeiten
     for k in kandidaten:
         if plan[tag][k] is not None:
             return False
         if (tag, k) in wunsch_daten[team]['gesperrt']:
             return False
             
-    # 1-Tag-Abstandsregel
+    # ABSTANDSREGELUNG (mit Optionalitaet)
     for exist_tag in team_tage[team]:
-        if abs(tage_index[tag] - tage_index[exist_tag]) < 2:
-            return False
+        if abstandsregel_aktiv:
+            if abs(tage_index[tag] - tage_index[exist_tag]) < 2:
+                return False
+        else:
+            # Wenn Abstandsregel deaktiviert ist, verbiete nur den identischen Tag
+            if tage_index[tag] == tage_index[exist_tag]:
+                return False
             
     # Bambini-Sperre ab 19 Uhr
     if team == "G-Jugend (Bambini)":
@@ -78,7 +81,7 @@ def place(tag, zeit, dauer, team, plan, team_tage, basiszeiten):
         plan[tag][k] = team
     team_tage[team].append(tag)
 
-def auto_place(team, dauer, plan, team_tage, wunsch_daten, basiszeiten, tage_index, logs, label="Auto"):
+def auto_place(team, dauer, plan, team_tage, wunsch_daten, basiszeiten, tage_index, logs, label, abstandsregel_aktiv):
     tage_keys = list(basiszeiten.keys())
     random.shuffle(tage_keys)
     
@@ -86,13 +89,13 @@ def auto_place(team, dauer, plan, team_tage, wunsch_daten, basiszeiten, tage_ind
         zeiten = list(basiszeiten[tag])
         random.shuffle(zeiten)
         for zeit in zeiten:
-            if check_valid(tag, zeit, dauer, team, plan, team_tage, wunsch_daten, basiszeiten, tage_index):
+            if check_valid(tag, zeit, dauer, team, plan, team_tage, wunsch_daten, basiszeiten, tage_index, abstandsregel_aktiv):
                 place(tag, zeit, dauer, team, plan, team_tage, basiszeiten)
                 logs.append(f"{label}-Zuweisung: {team} weicht auf {tag} ab {zeit} aus ({dauer} Min).")
                 return True
     return False
 
-def run_monte_carlo(basiszeiten, jugenden, durations, wunsch_daten, iterations=100):
+def run_monte_carlo(basiszeiten, jugenden, durations, wunsch_daten, abstandsregel_aktiv, iterations=100):
     best_score = -9999
     best_plan = None
     best_logs = []
@@ -112,7 +115,6 @@ def run_monte_carlo(basiszeiten, jugenden, durations, wunsch_daten, iterations=1
         score = 0
         assigned_count = {t: 0 for t in jugenden}
         
-        # 1. Wuensche 1 verteilen (Auslosen durch Zufallsreihenfolge)
         teams_w1 = list(jugenden)
         random.shuffle(teams_w1)
         for team in teams_w1:
@@ -123,7 +125,7 @@ def run_monte_carlo(basiszeiten, jugenden, durations, wunsch_daten, iterations=1
             random.shuffle(w1_options)
             placed = False
             for tag, zeit in w1_options:
-                if check_valid(tag, zeit, durations[team]['t1'], team, plan, team_tage, wunsch_daten, basiszeiten, tage_index):
+                if check_valid(tag, zeit, durations[team]['t1'], team, plan, team_tage, wunsch_daten, basiszeiten, tage_index, abstandsregel_aktiv):
                     place(tag, zeit, durations[team]['t1'], team, plan, team_tage, basiszeiten)
                     logs.append(f"Wunsch 1 erfuellt: {team} am {tag} ab {zeit}.")
                     assigned_count[team] += 1
@@ -133,7 +135,6 @@ def run_monte_carlo(basiszeiten, jugenden, durations, wunsch_daten, iterations=1
             if not placed:
                 logs.append(f"Wunsch 1 abgelehnt (Los verloren / Konflikt): {team}.")
 
-        # 2. Wuensche 2 verteilen
         teams_w2 = list(jugenden)
         random.shuffle(teams_w2)
         for team in teams_w2:
@@ -144,8 +145,7 @@ def run_monte_carlo(basiszeiten, jugenden, durations, wunsch_daten, iterations=1
             random.shuffle(w2_options)
             placed = False
             for tag, zeit in w2_options:
-                # W2 erfordert den T2-Dauer-Block
-                if check_valid(tag, zeit, durations[team]['t2'], team, plan, team_tage, wunsch_daten, basiszeiten, tage_index):
+                if check_valid(tag, zeit, durations[team]['t2'], team, plan, team_tage, wunsch_daten, basiszeiten, tage_index, abstandsregel_aktiv):
                     place(tag, zeit, durations[team]['t2'], team, plan, team_tage, basiszeiten)
                     logs.append(f"Wunsch 2 erfuellt: {team} am {tag} ab {zeit}.")
                     assigned_count[team] += 1
@@ -155,32 +155,28 @@ def run_monte_carlo(basiszeiten, jugenden, durations, wunsch_daten, iterations=1
             if not placed:
                 logs.append(f"Wunsch 2 abgelehnt (Los verloren / Konflikt): {team}.")
 
-        # 3. Lücken mit den fehlenden Einheiten schliessen
         teams_auto = list(jugenden)
         random.shuffle(teams_auto)
         
         for team in teams_auto:
             while assigned_count[team] < target_trainings[team]:
-                # Finde heraus, ob T1 oder T2 nachgeholt werden muss
                 if assigned_count[team] == 0 and durations[team]['t1'] > 0:
                     naechste_dauer = durations[team]['t1']
                 else:
                     naechste_dauer = durations[team]['t2']
                     if naechste_dauer == 0: naechste_dauer = durations[team]['t1']
                 
-                if auto_place(team, naechste_dauer, plan, team_tage, wunsch_daten, basiszeiten, tage_index, logs, "Rest-Fill"):
+                if auto_place(team, naechste_dauer, plan, team_tage, wunsch_daten, basiszeiten, tage_index, logs, "Rest-Fill", abstandsregel_aktiv):
                     assigned_count[team] += 1
                     score += 20
                 else:
                     break 
 
-        # 4. Auswertung des Durchlaufs
         for team in jugenden:
             if assigned_count[team] < target_trainings[team]:
                 fehlgeschlagen.append(team)
-                score -= 200 # Harte Strafe, wenn das Team nicht trainieren kann
+                score -= 200
 
-        # Besten Durchlauf speichern
         if score > best_score:
             best_score = score
             best_plan = copy.deepcopy(plan)
@@ -248,7 +244,6 @@ if uploaded_file:
         st.subheader("2. Interaktiver Eingabe-Kalender (Wuensche & Sperrzeiten)")
         st.write("Waehle in der Tabelle aus, wann eine Jugend trainieren moechte oder keinesfalls kann.")
 
-        # Vorbereiten des Kalender-DataFrames fuer die Eingabe
         kalender_rows = []
         for tag in ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag']:
             for zeit in basiszeiten[tag]:
@@ -266,10 +261,13 @@ if uploaded_file:
         }
         
         edited_df = st.data_editor(editor_df, column_config=col_config, use_container_width=True)
+        
+        st.divider()
+        st.subheader("3. Regel-Einstellungen")
+        abstandsregel_aktiv = st.checkbox("1-Tag-Abstandsregel erzwingen", value=True, help="Wenn deaktiviert, duerfen Teams auch an aufeinanderfolgenden Tagen (z.B. Mi und Do) trainieren. Zwei Trainings am identischen Tag sind grundsaetzlich gesperrt.")
 
         st.divider()
         if st.button("Belegungsplan erstellen und optimieren", type="primary"):
-            # Wuensche aus dem Kalender extrahieren
             wunsch_daten = {t: {'w1': [], 'w2': [], 'gesperrt': []} for t in ausgewaehlte_teams}
             for tag_zeit, row in edited_df.iterrows():
                 tag, zeit = tag_zeit.split(" ", 1)
@@ -288,6 +286,7 @@ if uploaded_file:
                 ausgewaehlte_teams, 
                 durations, 
                 st.session_state.wunsch_daten,
+                abstandsregel_aktiv,
                 iterations=100
             )
             
@@ -305,7 +304,6 @@ if uploaded_file:
             else:
                 st.success("Alle ausgewaehlten Trainingseinheiten konnten erfolgreich in den verfuegbaren Slots untergebracht werden.")
             
-            # Kalender erzeugen
             kalender_df = pd.DataFrame(index=zeit_raster, columns=['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag'])
             
             for tag in ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag']:
