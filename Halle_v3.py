@@ -37,6 +37,32 @@ def lade_basiszeiten(uploaded_file):
     raster = sorted(list(alle_uhrzeiten))
     return basiszeiten, gesamter_plan, raster
 
+@st.cache_data
+def lade_standard_zeiten():
+    """Fallback-Funktion, falls keine Excel-Datei hochgeladen wird."""
+    basiszeiten = {
+        'Montag': ['15:30–16:00', '16:00–16:30', '16:30–17:00', '17:00–17:30', '17:30–18:00', '18:00–18:30', '18:30–19:00'],
+        'Dienstag': [],
+        'Mittwoch': ['16:00–16:30', '16:30–17:00', '17:00–17:30', '17:30–18:00', '18:00–18:30', '18:30–19:00', '19:00–19:30', '19:30–20:00'],
+        'Donnerstag': ['16:30–17:00', '17:00–17:30', '17:30–18:00', '18:00–18:30', '18:30–19:00', '19:00–19:30'],
+        'Freitag': ['15:00–15:30', '15:30–16:00', '16:00–16:30', '16:30–17:00']
+    }
+    
+    raster = [
+        '15:00–15:30', '15:30–16:00', '16:00–16:30', '16:30–17:00',
+        '17:00–17:30', '17:30–18:00', '18:00–18:30', '18:30–19:00',
+        '19:00–19:30', '19:30–20:00'
+    ]
+    
+    gesamter_plan = {tag: {z: "" for z in raster} for tag in ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag']}
+    
+    # Markiere die Basiszeiten im Gesamtplan als frei
+    for tag, zeiten in basiszeiten.items():
+        for z in zeiten:
+            gesamter_plan[tag][z] = "SVT Fußball (Junioren)"
+            
+    return basiszeiten, gesamter_plan, raster
+
 def check_valid(tag, zeit, dauer, team, plan, team_tage, wunsch_daten, basiszeiten, tage_index, abstandsregel_aktiv):
     bloecke = dauer // 30
     if zeit not in basiszeiten[tag]: return False
@@ -55,17 +81,14 @@ def check_valid(tag, zeit, dauer, team, plan, team_tage, wunsch_daten, basiszeit
         if (tag, k) in wunsch_daten[team]['gesperrt']:
             return False
             
-    # ABSTANDSREGELUNG (mit Optionalitaet)
     for exist_tag in team_tage[team]:
         if abstandsregel_aktiv:
             if abs(tage_index[tag] - tage_index[exist_tag]) < 2:
                 return False
         else:
-            # Wenn Abstandsregel deaktiviert ist, verbiete nur den identischen Tag
             if tage_index[tag] == tage_index[exist_tag]:
                 return False
             
-    # Bambini-Sperre ab 19 Uhr
     if team == "G-Jugend (Bambini)":
         start_stunde = int(kandidaten[0].split('–')[0].split(':')[0])
         if start_stunde >= 19:
@@ -202,11 +225,22 @@ def optimiere_t2(ausgewaehlte_teams):
     st.session_state.berechnen = True
 
 # --- BENUTZEROBERFLAECHE ---
-uploaded_file = st.file_uploader("Excel-Belegungsplan hochladen (.xlsx)", type=["xlsx"])
+col_upload, col_standard = st.columns([1, 1])
+with col_upload:
+    uploaded_file = st.file_uploader("Excel-Belegungsplan hochladen (.xlsx)", type=["xlsx"])
+with col_standard:
+    st.markdown("<br><br>", unsafe_allow_html=True)
+    nutze_standard = st.checkbox("Standard-Hallenplan (ohne Excel) laden", value=False)
 
+daten_geladen = False
 if uploaded_file:
     basiszeiten, gesamter_plan, zeit_raster = lade_basiszeiten(uploaded_file)
-    
+    daten_geladen = True
+elif nutze_standard:
+    basiszeiten, gesamter_plan, zeit_raster = lade_standard_zeiten()
+    daten_geladen = True
+
+if daten_geladen:
     st.divider()
     st.subheader("1. Teilnehmende Teams und Dauer")
     
@@ -324,3 +358,5 @@ if uploaded_file:
             st.subheader("Auswertungs-Protokoll (Auslosung & Zuweisung)")
             for log in logs:
                 st.text(log)
+else:
+    st.info("Bitte lade eine Excel-Datei hoch oder aktiviere den Standard-Hallenplan, um zu beginnen.")
