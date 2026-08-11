@@ -261,7 +261,7 @@ if daten_geladen:
             c1, c2, c3 = st.columns([2, 1, 1])
             c1.markdown(f"<div style='padding-top: 10px;'><b>{team}</b></div>", unsafe_allow_html=True)
             
-            def_t1 = 90 if team == "F2-Jugend" else 60
+            def_t1 = 90 if team == "G-Jugend (Bambini)" else 60
             def_t2 = 60
             
             t1_key = f"t1_d_{team}"
