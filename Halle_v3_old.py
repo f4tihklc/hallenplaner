@@ -6,9 +6,9 @@ import copy
 st.set_page_config(page_title="Hallenplaner", layout="wide")
 
 st.title("Hallenbelegungsplaner")
-st.markdown("Trage Wuensche und Sperrzeiten direkt in den Kalender ein. Das System lost bei Ueberschneidungen automatisch aus und optimiert die Belegung, um alle Slots maximal zu fuellen.")
+st.markdown("Lege Trainingsdauer, Wuensche und Sperrzeiten uebersichtlich pro Team fest. Das System optimiert die lueckenlose Auslastung (90-Minuten-Bloecke zuerst) und erlaubt manuelle Anpassungen.")
 
-alle_jugenden = ["G-Jugend (Bambini)", "F2-Jugend", "F1-Jugend", "E2-Jugend", "E1-Jugend", "D-Jugend"]
+alle_jugenden = ["G-Jugend (Bambini)", "F2-Jugend", "F1-Jugend", "E-Jugend", "D-Jugend"]
 
 @st.cache_data
 def lade_basiszeiten(uploaded_file):
@@ -39,7 +39,6 @@ def lade_basiszeiten(uploaded_file):
 
 @st.cache_data
 def lade_standard_zeiten():
-    """Fallback-Funktion, falls keine Excel-Datei hochgeladen wird."""
     basiszeiten = {
         'Montag': ['15:30–16:00', '16:00–16:30', '16:30–17:00', '17:00–17:30', '17:30–18:00', '18:00–18:30', '18:30–19:00'],
         'Dienstag': [],
@@ -56,7 +55,6 @@ def lade_standard_zeiten():
     
     gesamter_plan = {tag: {z: "" for z in raster} for tag in ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag']}
     
-    # Markiere die Basiszeiten im Gesamtplan als frei
     for tag, zeiten in basiszeiten.items():
         for z in zeiten:
             gesamter_plan[tag][z] = "SVT Fußball (Junioren)"
@@ -88,9 +86,11 @@ def check_valid(tag, zeit, dauer, team, plan, team_tage, wunsch_daten, basiszeit
         else:
             if tage_index[tag] == tage_index[exist_tag]:
                 return False
-            
-    if team == "G-Jugend (Bambini)":
+                
+    # Harte Sperre fuer G-Jugend und F2-Jugend ab 18:30 Uhr
+    if team in ["G-Jugend (Bambini)", "F2-Jugend"]:
         start_stunde = int(kandidaten[0].split('–')[0].split(':')[0])
+        start_min = int(kandidaten[0].split('–')[0].split(':')[1])
         if start_stunde >= 19:
             return False
             
@@ -118,17 +118,13 @@ def auto_place(team, dauer, plan, team_tage, wunsch_daten, basiszeiten, tage_ind
                 return True
     return False
 
-def run_monte_carlo(basiszeiten, jugenden, durations, wunsch_daten, abstandsregel_aktiv, iterations=100):
-    best_score = -9999
+def run_monte_carlo(basiszeiten, jugenden, durations, wunsch_daten, abstandsregel_aktiv, iterations=200):
+    best_score = -99999
     best_plan = None
     best_logs = []
     best_fehlgeschlagen = []
     
     tage_index = {'Montag': 0, 'Dienstag': 1, 'Mittwoch': 2, 'Donnerstag': 3, 'Freitag': 4}
-    target_trainings = {t: 0 for t in jugenden}
-    for t in jugenden:
-        if durations[t]['t1'] > 0: target_trainings[t] += 1
-        if durations[t]['t2'] > 0: target_trainings[t] += 1
 
     for _ in range(iterations):
         plan = {tag: {z: None for z in zeiten} for tag, zeiten in basiszeiten.items()}
@@ -136,69 +132,40 @@ def run_monte_carlo(basiszeiten, jugenden, durations, wunsch_daten, abstandsrege
         logs = []
         fehlgeschlagen = []
         score = 0
-        assigned_count = {t: 0 for t in jugenden}
         
-        teams_w1 = list(jugenden)
-        random.shuffle(teams_w1)
-        for team in teams_w1:
-            if durations[team]['t1'] == 0: continue
-            w1_options = wunsch_daten[team]['w1']
-            if not w1_options: continue
-            
-            random.shuffle(w1_options)
-            placed = False
-            for tag, zeit in w1_options:
-                if check_valid(tag, zeit, durations[team]['t1'], team, plan, team_tage, wunsch_daten, basiszeiten, tage_index, abstandsregel_aktiv):
-                    place(tag, zeit, durations[team]['t1'], team, plan, team_tage, basiszeiten)
-                    logs.append(f"Wunsch 1 erfuellt: {team} am {tag} ab {zeit}.")
-                    assigned_count[team] += 1
-                    score += 50
-                    placed = True
-                    break
-            if not placed:
-                logs.append(f"Wunsch 1 abgelehnt (Los verloren / Konflikt): {team}.")
-
-        teams_w2 = list(jugenden)
-        random.shuffle(teams_w2)
-        for team in teams_w2:
-            if durations[team]['t2'] == 0: continue
-            w2_options = wunsch_daten[team]['w2']
-            if not w2_options: continue
-            
-            random.shuffle(w2_options)
-            placed = False
-            for tag, zeit in w2_options:
-                if check_valid(tag, zeit, durations[team]['t2'], team, plan, team_tage, wunsch_daten, basiszeiten, tage_index, abstandsregel_aktiv):
-                    place(tag, zeit, durations[team]['t2'], team, plan, team_tage, basiszeiten)
-                    logs.append(f"Wunsch 2 erfuellt: {team} am {tag} ab {zeit}.")
-                    assigned_count[team] += 1
-                    score += 40
-                    placed = True
-                    break
-            if not placed:
-                logs.append(f"Wunsch 2 abgelehnt (Los verloren / Konflikt): {team}.")
-
-        teams_auto = list(jugenden)
-        random.shuffle(teams_auto)
-        
-        for team in teams_auto:
-            while assigned_count[team] < target_trainings[team]:
-                if assigned_count[team] == 0 and durations[team]['t1'] > 0:
-                    naechste_dauer = durations[team]['t1']
-                else:
-                    naechste_dauer = durations[team]['t2']
-                    if naechste_dauer == 0: naechste_dauer = durations[team]['t1']
+        reqs = []
+        for team in jugenden:
+            if durations[team]['t1'] > 0:
+                reqs.append({'team': team, 'dauer': durations[team]['t1'], 'type': 'T1', 'wishes': wunsch_daten[team]['w1']})
+            if durations[team]['t2'] > 0:
+                reqs.append({'team': team, 'dauer': durations[team]['t2'], 'type': 'T2', 'wishes': wunsch_daten[team]['w2']})
                 
-                if auto_place(team, naechste_dauer, plan, team_tage, wunsch_daten, basiszeiten, tage_index, logs, "Rest-Fill", abstandsregel_aktiv):
-                    assigned_count[team] += 1
+        # Zuerst mischen, dann nach Dauer sortieren -> 90 Min Bloecke werden zuerst gesetzt
+        random.shuffle(reqs)
+        reqs.sort(key=lambda x: x['dauer'], reverse=True)
+        
+        for req in reqs:
+            team = req['team']
+            dauer = req['dauer']
+            wishes = list(req['wishes'])
+            placed = False
+            
+            if wishes:
+                random.shuffle(wishes)
+                for tag, zeit in wishes:
+                    if check_valid(tag, zeit, dauer, team, plan, team_tage, wunsch_daten, basiszeiten, tage_index, abstandsregel_aktiv):
+                        place(tag, zeit, dauer, team, plan, team_tage, basiszeiten)
+                        logs.append(f"Wunsch erfuellt ({req['type']}): {team} am {tag} ab {zeit}.")
+                        score += 50
+                        placed = True
+                        break
+                        
+            if not placed:
+                if auto_place(team, dauer, plan, team_tage, wunsch_daten, basiszeiten, tage_index, logs, "Auto", abstandsregel_aktiv):
                     score += 20
                 else:
-                    break 
-
-        for team in jugenden:
-            if assigned_count[team] < target_trainings[team]:
-                fehlgeschlagen.append(team)
-                score -= 200
+                    fehlgeschlagen.append(f"{team} ({req['type']})")
+                    score -= 1000 
 
         if score > best_score:
             best_score = score
@@ -213,7 +180,7 @@ def farbe_kalender(wert):
         return ""
     if wert in alle_jugenden:
         return "background-color: #ffd966; color: black; font-weight: bold;"
-    if "SVT Fußball (Junioren)" in str(wert):
+    if wert == "--- Frei ---":
         return "background-color: #93c47d; color: black;"
     return "background-color: #d9d9d9; color: #7f7f7f; font-style: italic;"
 
@@ -242,76 +209,91 @@ elif nutze_standard:
 
 if daten_geladen:
     st.divider()
-    st.subheader("1. Teilnehmende Teams und Dauer")
     
     ausgewaehlte_teams = st.multiselect(
-        "Waehle die Teams aus:",
+        "Teilnehmende Teams waehlen:",
         options=alle_jugenden,
         default=alle_jugenden
     )
     
     if ausgewaehlte_teams:
-        durations = {}
-        col1, col2, col3 = st.columns([2, 1, 1])
-        col1.write("**Jugend**")
-        col2.write("**Dauer T1 (Min)**")
-        col3.write("**Dauer T2 (Min)**")
+        st.subheader("1. Individuelle Teameinstellungen")
+        st.write("Klicke auf eine Jugend, um Dauer, Wunschzeiten und Sperren einzustellen.")
         
-        for team in ausgewaehlte_teams:
-            c1, c2, c3 = st.columns([2, 1, 1])
-            c1.markdown(f"<div style='padding-top: 10px;'><b>{team}</b></div>", unsafe_allow_html=True)
-            
-            def_t1 = 60 if team == "G-Jugend (Bambini)" else 90
-            def_t2 = 0 if team == "G-Jugend (Bambini)" else 90
-            
-            t1_key = f"t1_d_{team}"
-            if t1_key not in st.session_state: st.session_state[t1_key] = def_t1
-            t1_val = c2.selectbox(f"T1 {team}", options=[0, 60, 90], key=t1_key, label_visibility="collapsed")
-            
-            t2_key = f"t2_d_{team}"
-            if t2_key not in st.session_state: st.session_state[t2_key] = def_t2
-            t2_val = c3.selectbox(f"T2 {team}", options=[0, 60, 90], key=t2_key, label_visibility="collapsed")
-            
-            durations[team] = {'t1': t1_val, 't2': t2_val}
-
-        st.divider()
-        st.subheader("2. Interaktiver Eingabe-Kalender (Wuensche & Sperrzeiten)")
-        st.write("Waehle in der Tabelle aus, wann eine Jugend trainieren moechte oder keinesfalls kann.")
-
-        kalender_rows = []
+        # Tabs fuer eine aufgeraeumte Darstellung
+        tabs = st.tabs(ausgewaehlte_teams)
+        
+        # Flache Liste aller verfuegbaren Zeiten erstellen
+        alle_zeiten_flach = []
         for tag in ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag']:
-            for zeit in basiszeiten[tag]:
-                kalender_rows.append(f"{tag} {zeit}")
+            for z in basiszeiten[tag]:
+                alle_zeiten_flach.append(f"{tag} {z}")
                 
-        editor_df = pd.DataFrame(index=kalender_rows, columns=ausgewaehlte_teams)
-        editor_df.fillna("", inplace=True)
+        durations = {}
+        wunsch_daten = {t: {'w1': [], 'w2': [], 'gesperrt': []} for t in ausgewaehlte_teams}
         
-        col_config = {
-            team: st.column_config.SelectboxColumn(
-                team, 
-                options=["", "Wunsch 1", "Wunsch 2", "Gesperrt"],
-                default=""
-            ) for team in ausgewaehlte_teams
-        }
-        
-        edited_df = st.data_editor(editor_df, column_config=col_config, use_container_width=True)
-        
-        st.divider()
-        st.subheader("3. Regel-Einstellungen")
-        abstandsregel_aktiv = st.checkbox("1-Tag-Abstandsregel erzwingen", value=True, help="Wenn deaktiviert, duerfen Teams auch an aufeinanderfolgenden Tagen (z.B. Mi und Do) trainieren. Zwei Trainings am identischen Tag sind grundsaetzlich gesperrt.")
+        for i, team in enumerate(ausgewaehlte_teams):
+            with tabs[i]:
+                # Voreinstellungen abhaengig vom Team
+                if team == "G-Jugend (Bambini)":
+                    def_t1, def_t2 = 60, 0
+                elif team == "F2-Jugend":
+                    def_t1, def_t2 = 90, 0
+                else:
+                    def_t1, def_t2 = 90, 90
+                
+                # Standard-Sperrzeiten fuer G und F2 generieren
+                default_sperren = []
+                if team in ["G-Jugend (Bambini)", "F2-Jugend"]:
+                    for tz in alle_zeiten_flach:
+                        z = tz.split(" ", 1)[1]
+                        h = int(z.split('–')[0].split(':')[0])
+                        m = int(z.split('–')[0].split(':')[1])
+                        if h >= 19 or (h == 18 and m >= 30):
+                            default_sperren.append(tz)
+                
+                # Layout innerhalb des Tabs
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.markdown("**1. Training**")
+                    t1_val = st.selectbox("Dauer T1", options=[0, 60, 90], index=[0, 60, 90].index(def_t1), key=f"t1_d_{team}")
+                    w1_val = st.selectbox("Wunsch-Startzeit T1", options=["Kein Wunsch"] + alle_zeiten_flach, key=f"w1_{team}")
+                    
+                    if w1_val != "Kein Wunsch":
+                        tag, zeit = w1_val.split(" ", 1)
+                        wunsch_daten[team]['w1'].append((tag, zeit))
+                        
+                with col2:
+                    st.markdown("**2. Training**")
+                    t2_val = st.selectbox("Dauer T2", options=[0, 60, 90], index=[0, 60, 90].index(def_t2), key=f"t2_d_{team}")
+                    w2_val = st.selectbox("Wunsch-Startzeit T2", options=["Kein Wunsch"] + alle_zeiten_flach, key=f"w2_{team}")
+                    
+                    if w2_val != "Kein Wunsch":
+                        tag, zeit = w2_val.split(" ", 1)
+                        wunsch_daten[team]['w2'].append((tag, zeit))
+                        
+                st.markdown("<br>", unsafe_allow_html=True)
+                
+                gesperrt = st.multiselect(
+                    "Sperrzeiten (Zeiten an denen das Team absolut NICHT kann):",
+                    options=alle_zeiten_flach,
+                    default=default_sperren,
+                    key=f"sperr_{team}"
+                )
+                
+                for tz in gesperrt:
+                    tag, zeit = tz.split(" ", 1)
+                    wunsch_daten[team]['gesperrt'].append((tag, zeit))
+                    
+                durations[team] = {'t1': t1_val, 't2': t2_val}
 
         st.divider()
-        if st.button("Belegungsplan erstellen und optimieren", type="primary"):
-            wunsch_daten = {t: {'w1': [], 'w2': [], 'gesperrt': []} for t in ausgewaehlte_teams}
-            for tag_zeit, row in edited_df.iterrows():
-                tag, zeit = tag_zeit.split(" ", 1)
-                for team in ausgewaehlte_teams:
-                    val = row[team]
-                    if val == "Wunsch 1": wunsch_daten[team]['w1'].append((tag, zeit))
-                    elif val == "Wunsch 2": wunsch_daten[team]['w2'].append((tag, zeit))
-                    elif val == "Gesperrt": wunsch_daten[team]['gesperrt'].append((tag, zeit))
-                    
-            st.session_state.wunsch_daten = wunsch_daten
+        st.subheader("2. Regel-Einstellungen")
+        abstandsregel_aktiv = st.checkbox("1-Tag-Abstandsregel erzwingen", value=True, help="Wenn deaktiviert, duerfen Teams auch an aufeinanderfolgenden Tagen (z.B. Mi und Do) trainieren. Zwei Trainings am identischen Tag sind weiterhin gesperrt.")
+
+        st.divider()
+        if st.button("Belegungsplan berechnen und auslosen", type="primary"):
             st.session_state.berechnen = True
             
         if st.session_state.get("berechnen", False):
@@ -319,15 +301,15 @@ if daten_geladen:
                 basiszeiten, 
                 ausgewaehlte_teams, 
                 durations, 
-                st.session_state.wunsch_daten,
+                wunsch_daten,
                 abstandsregel_aktiv,
-                iterations=100
+                iterations=200 
             )
             
             if fehlgeschlagen:
                 fehl_text = ", ".join(fehlgeschlagen)
                 st.toast(f"Planungskonflikt: {fehl_text} konnten nicht vollstaendig zugewiesen werden.")
-                st.error(f"WARNUNG: Die folgenden Jugenden konnten aufgrund von Platzmangel oder Abstandsregeln nicht an beiden Tagen zugewiesen werden: {fehl_text}. Bitte passe die Trainingsdauer oder Sperrzeiten an.")
+                st.error(f"WARNUNG: Die folgenden Jugenden konnten aufgrund von Platzmangel nicht vollstaendig zugewiesen werden: {fehl_text}.")
                 
                 st.button(
                     "Automatische Not-Optimierung (2. Tage aller Teams auf 60 Min kuerzen)", 
@@ -336,9 +318,11 @@ if daten_geladen:
                     type="secondary"
                 )
             else:
-                st.success("Alle ausgewaehlten Trainingseinheiten konnten erfolgreich in den verfuegbaren Slots untergebracht werden.")
+                st.success("Alle ausgewaehlten Trainingseinheiten konnten erfolgreich platziert werden!")
             
+            # --- INTERAKTIVER ERGEBNIS-KALENDER ZUM MANUELLEN ANPASSEN ---
             kalender_df = pd.DataFrame(index=zeit_raster, columns=['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag'])
+            fremd_belegungen_liste = set()
             
             for tag in ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag']:
                 for zeit in zeit_raster:
@@ -346,14 +330,37 @@ if daten_geladen:
                     if team_belegung:
                         kalender_df.at[zeit, tag] = team_belegung
                     else:
-                        kalender_df.at[zeit, tag] = gesamter_plan.get(tag, {}).get(zeit, "")
+                        orig = gesamter_plan.get(tag, {}).get(zeit, "")
+                        if "SVT Fußball (Junioren)" in orig:
+                            kalender_df.at[zeit, tag] = "--- Frei ---"
+                        else:
+                            kalender_df.at[zeit, tag] = orig
+                            if orig != "":
+                                fremd_belegungen_liste.add(orig)
                         
             kalender_df = kalender_df.dropna(how='all')
             kalender_df.fillna("", inplace=True)
             
-            st.subheader("Der fertige Wochenkalender")
+            auswahl_optionen = ["", "--- Frei ---"] + ausgewaehlte_teams + list(fremd_belegungen_liste)
+            
+            st.subheader("Der fertige Wochenkalender (Manuell anpassbar)")
+            st.write("Du kannst die berechneten Trainingszeiten hier direkt in der Tabelle anklicken und über das Dropdown-Menü jederzeit händisch verschieben oder korrigieren.")
+            
+            col_config_output = {
+                tag: st.column_config.SelectboxColumn(
+                    tag,
+                    options=auswahl_optionen,
+                ) for tag in kalender_df.columns
+            }
+            
             styled_df = kalender_df.style.map(farbe_kalender)
-            st.dataframe(styled_df, use_container_width=True, height=600)
+            
+            finaler_plan = st.data_editor(
+                styled_df, 
+                column_config=col_config_output, 
+                use_container_width=True,
+                key="finaler_editor"
+            )
             
             st.subheader("Auswertungs-Protokoll (Auslosung & Zuweisung)")
             for log in logs:
