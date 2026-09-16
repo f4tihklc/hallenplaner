@@ -91,7 +91,7 @@ def check_valid(tag, zeit, dauer, team, plan, team_tage, wunsch_daten, basiszeit
     if team in ["G-Jugend (Bambini)", "F2-Jugend"]:
         start_stunde = int(kandidaten[0].split('–')[0].split(':')[0])
         start_min = int(kandidaten[0].split('–')[0].split(':')[1])
-        if start_stunde >= 19 or (start_stunde == 18 and start_min >= 30):
+        if start_stunde >= 19:
             return False
             
     return True
