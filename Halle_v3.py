@@ -6,7 +6,7 @@ import copy
 st.set_page_config(page_title="Hallenplaner", layout="wide")
 
 st.title("Hallenbelegungsplaner")
-st.markdown("Trage Wuensche und Sperrzeiten direkt ein. Das System priorisiert eine lueckenlose Auslastung (90-Minuten-Bloecke zuerst) und erlaubt im Nachgang manuelle Anpassungen im Kalender.")
+st.markdown("Lege Trainingsdauer, Wuensche und Sperrzeiten uebersichtlich pro Team fest. Das System optimiert die lueckenlose Auslastung (90-Minuten-Bloecke zuerst) und erlaubt manuelle Anpassungen.")
 
 alle_jugenden = ["G-Jugend (Bambini)", "F2-Jugend", "F1-Jugend", "E-Jugend", "D-Jugend"]
 
@@ -39,7 +39,6 @@ def lade_basiszeiten(uploaded_file):
 
 @st.cache_data
 def lade_standard_zeiten():
-    """Fallback-Funktion, falls keine Excel-Datei hochgeladen wird."""
     basiszeiten = {
         'Montag': ['15:30–16:00', '16:00–16:30', '16:30–17:00', '17:00–17:30', '17:30–18:00', '18:00–18:30', '18:30–19:00'],
         'Dienstag': [],
@@ -87,7 +86,7 @@ def check_valid(tag, zeit, dauer, team, plan, team_tage, wunsch_daten, basiszeit
         else:
             if tage_index[tag] == tage_index[exist_tag]:
                 return False
-            
+                
     # Harte Sperre fuer G-Jugend und F2-Jugend ab 18:30 Uhr
     if team in ["G-Jugend (Bambini)", "F2-Jugend"]:
         start_stunde = int(kandidaten[0].split('–')[0].split(':')[0])
@@ -210,92 +209,91 @@ elif nutze_standard:
 
 if daten_geladen:
     st.divider()
-    st.subheader("1. Teilnehmende Teams und Dauer")
     
     ausgewaehlte_teams = st.multiselect(
-        "Waehle die Teams aus:",
+        "Teilnehmende Teams waehlen:",
         options=alle_jugenden,
         default=alle_jugenden
     )
     
     if ausgewaehlte_teams:
-        durations = {}
-        col1, col2, col3 = st.columns([2, 1, 1])
-        col1.write("**Jugend**")
-        col2.write("**Dauer T1 (Min)**")
-        col3.write("**Dauer T2 (Min)**")
+        st.subheader("1. Individuelle Teameinstellungen")
+        st.write("Klicke auf eine Jugend, um Dauer, Wunschzeiten und Sperren einzustellen.")
         
-        for team in ausgewaehlte_teams:
-            c1, c2, c3 = st.columns([2, 1, 1])
-            c1.markdown(f"<div style='padding-top: 10px;'><b>{team}</b></div>", unsafe_allow_html=True)
-            
-            # Voreinstellungen
-            if team == "G-Jugend (Bambini)":
-                def_t1, def_t2 = 60, 0
-            elif team == "F2-Jugend":
-                def_t1, def_t2 = 90, 0
-            else:
-                def_t1, def_t2 = 90, 90
-            
-            t1_key = f"t1_d_{team}"
-            if t1_key not in st.session_state: st.session_state[t1_key] = def_t1
-            t1_val = c2.selectbox(f"T1 {team}", options=[0, 60, 90], key=t1_key, label_visibility="collapsed")
-            
-            t2_key = f"t2_d_{team}"
-            if t2_key not in st.session_state: st.session_state[t2_key] = def_t2
-            t2_val = c3.selectbox(f"T2 {team}", options=[0, 60, 90], key=t2_key, label_visibility="collapsed")
-            
-            durations[team] = {'t1': t1_val, 't2': t2_val}
-
-        st.divider()
-        st.subheader("2. Interaktiver Eingabe-Kalender (Wuensche & Sperrzeiten)")
-        st.write("Waehle in der Tabelle aus, wann eine Jugend trainieren moechte. Zeiten ab 18:30 Uhr sind fuer G und F2 bereits gesperrt.")
-
-        kalender_rows = []
+        # Tabs fuer eine aufgeraeumte Darstellung
+        tabs = st.tabs(ausgewaehlte_teams)
+        
+        # Flache Liste aller verfuegbaren Zeiten erstellen
+        alle_zeiten_flach = []
         for tag in ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag']:
-            for zeit in basiszeiten[tag]:
-                kalender_rows.append(f"{tag} {zeit}")
+            for z in basiszeiten[tag]:
+                alle_zeiten_flach.append(f"{tag} {z}")
                 
-        editor_df = pd.DataFrame(index=kalender_rows, columns=ausgewaehlte_teams)
+        durations = {}
+        wunsch_daten = {t: {'w1': [], 'w2': [], 'gesperrt': []} for t in ausgewaehlte_teams}
         
-        # Sperrzeiten fuer G und F2 automatisch in die UI eintragen
-        for tag_zeit in kalender_rows:
-            zeit_part = tag_zeit.split(" ", 1)[1]
-            start_stunde = int(zeit_part.split('–')[0].split(':')[0])
-            start_min = int(zeit_part.split('–')[0].split(':')[1])
-            is_late = start_stunde >= 19
-            
-            for team in ausgewaehlte_teams:
-                if team in ["G-Jugend (Bambini)", "F2-Jugend"] and is_late:
-                    editor_df.at[tag_zeit, team] = "Gesperrt"
+        for i, team in enumerate(ausgewaehlte_teams):
+            with tabs[i]:
+                # Voreinstellungen abhaengig vom Team
+                if team == "G-Jugend (Bambini)":
+                    def_t1, def_t2 = 60, 0
+                elif team == "F2-Jugend":
+                    def_t1, def_t2 = 90, 0
                 else:
-                    editor_df.at[tag_zeit, team] = ""
-        
-        col_config_input = {
-            team: st.column_config.SelectboxColumn(
-                team, 
-                options=["", "Wunsch 1", "Wunsch 2", "Gesperrt"],
-            ) for team in ausgewaehlte_teams
-        }
-        
-        edited_df = st.data_editor(editor_df, column_config=col_config_input, use_container_width=True)
-        
-        st.divider()
-        st.subheader("3. Regel-Einstellungen")
-        abstandsregel_aktiv = st.checkbox("1-Tag-Abstandsregel erzwingen", value=True, help="Wenn deaktiviert, duerfen Teams auch an aufeinanderfolgenden Tagen (z.B. Mi und Do) trainieren. Zwei Trainings am identischen Tag sind grundsaetzlich gesperrt.")
+                    def_t1, def_t2 = 90, 90
+                
+                # Standard-Sperrzeiten fuer G und F2 generieren
+                default_sperren = []
+                if team in ["G-Jugend (Bambini)", "F2-Jugend"]:
+                    for tz in alle_zeiten_flach:
+                        z = tz.split(" ", 1)[1]
+                        h = int(z.split('–')[0].split(':')[0])
+                        m = int(z.split('–')[0].split(':')[1])
+                        if h >= 19 or (h == 18 and m >= 30):
+                            default_sperren.append(tz)
+                
+                # Layout innerhalb des Tabs
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.markdown("**1. Training**")
+                    t1_val = st.selectbox("Dauer T1", options=[0, 60, 90], index=[0, 60, 90].index(def_t1), key=f"t1_d_{team}")
+                    w1_val = st.selectbox("Wunsch-Startzeit T1", options=["Kein Wunsch"] + alle_zeiten_flach, key=f"w1_{team}")
+                    
+                    if w1_val != "Kein Wunsch":
+                        tag, zeit = w1_val.split(" ", 1)
+                        wunsch_daten[team]['w1'].append((tag, zeit))
+                        
+                with col2:
+                    st.markdown("**2. Training**")
+                    t2_val = st.selectbox("Dauer T2", options=[0, 60, 90], index=[0, 60, 90].index(def_t2), key=f"t2_d_{team}")
+                    w2_val = st.selectbox("Wunsch-Startzeit T2", options=["Kein Wunsch"] + alle_zeiten_flach, key=f"w2_{team}")
+                    
+                    if w2_val != "Kein Wunsch":
+                        tag, zeit = w2_val.split(" ", 1)
+                        wunsch_daten[team]['w2'].append((tag, zeit))
+                        
+                st.markdown("<br>", unsafe_allow_html=True)
+                
+                gesperrt = st.multiselect(
+                    "Sperrzeiten (Zeiten an denen das Team absolut NICHT kann):",
+                    options=alle_zeiten_flach,
+                    default=default_sperren,
+                    key=f"sperr_{team}"
+                )
+                
+                for tz in gesperrt:
+                    tag, zeit = tz.split(" ", 1)
+                    wunsch_daten[team]['gesperrt'].append((tag, zeit))
+                    
+                durations[team] = {'t1': t1_val, 't2': t2_val}
 
         st.divider()
-        if st.button("Belegungsplan erstellen und optimieren", type="primary"):
-            wunsch_daten = {t: {'w1': [], 'w2': [], 'gesperrt': []} for t in ausgewaehlte_teams}
-            for tag_zeit, row in edited_df.iterrows():
-                tag, zeit = tag_zeit.split(" ", 1)
-                for team in ausgewaehlte_teams:
-                    val = row[team]
-                    if val == "Wunsch 1": wunsch_daten[team]['w1'].append((tag, zeit))
-                    elif val == "Wunsch 2": wunsch_daten[team]['w2'].append((tag, zeit))
-                    elif val == "Gesperrt": wunsch_daten[team]['gesperrt'].append((tag, zeit))
-                    
-            st.session_state.wunsch_daten = wunsch_daten
+        st.subheader("2. Regel-Einstellungen")
+        abstandsregel_aktiv = st.checkbox("1-Tag-Abstandsregel erzwingen", value=True, help="Wenn deaktiviert, duerfen Teams auch an aufeinanderfolgenden Tagen (z.B. Mi und Do) trainieren. Zwei Trainings am identischen Tag sind weiterhin gesperrt.")
+
+        st.divider()
+        if st.button("Belegungsplan berechnen und auslosen", type="primary"):
             st.session_state.berechnen = True
             
         if st.session_state.get("berechnen", False):
@@ -303,7 +301,7 @@ if daten_geladen:
                 basiszeiten, 
                 ausgewaehlte_teams, 
                 durations, 
-                st.session_state.wunsch_daten,
+                wunsch_daten,
                 abstandsregel_aktiv,
                 iterations=200 
             )
