@@ -12,7 +12,7 @@ st.markdown(
     .watermark {
         position: fixed;
         bottom: 15px;
-        right: 15px;
+        right: 500px;
         color: rgba(128, 128, 128, 0.5);
         font-size: 14px;
         font-family: sans-serif;
