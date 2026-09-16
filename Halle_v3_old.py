@@ -5,7 +5,7 @@ import copy
 
 st.set_page_config(page_title="Hallenplaner", layout="wide")
 
-st.title("Hallenbelegungsplaner")
+st.title("SVT-Jugend Hallenbelegungsplaner")
 st.markdown("Lege Trainingsdauer, Wuensche und Sperrzeiten uebersichtlich pro Team fest. Das System optimiert die lueckenlose Auslastung (90-Minuten-Bloecke zuerst) und erlaubt manuelle Anpassungen.")
 
 alle_jugenden = ["G-Jugend (Bambini)", "F2-Jugend", "F1-Jugend", "E-Jugend", "D-Jugend"]
