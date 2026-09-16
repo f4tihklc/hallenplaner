@@ -8,7 +8,7 @@ st.set_page_config(page_title="Hallenplaner", layout="wide")
 st.title("Hallenbelegungsplaner")
 st.markdown("Trage Wuensche und Sperrzeiten direkt in den Kalender ein. Das System lost bei Ueberschneidungen automatisch aus und optimiert die Belegung, um alle Slots maximal zu fuellen.")
 
-alle_jugenden = ["G-Jugend (Bambini)", "F2-Jugend", "F1-Jugend", "E2-Jugend", "E1-Jugend", "D-Jugend"]
+alle_jugenden = ["G-Jugend (Bambini)", "F2-Jugend", "F1-Jugend", "E-Jugend", "D-Jugend"]
 
 @st.cache_data
 def lade_basiszeiten(uploaded_file):
