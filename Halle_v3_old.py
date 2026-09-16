@@ -5,6 +5,28 @@ import copy
 
 st.set_page_config(page_title="Hallenplaner", layout="wide")
 
+# --- WASSERZEICHEN ---
+st.markdown(
+    """
+    <style>
+    .watermark {
+        position: fixed;
+        bottom: 15px;
+        right: 15px;
+        color: rgba(128, 128, 128, 0.5);
+        font-size: 14px;
+        font-family: sans-serif;
+        font-weight: bold;
+        z-index: 9999;
+        pointer-events: none;
+        user-select: none;
+    }
+    </style>
+    <div class="watermark">Planungstool © Fatih</div>
+    """,
+    unsafe_allow_html=True
+)
+
 st.title("SVT-Jugend Hallenbelegungsplaner")
 st.markdown("Lege Trainingsdauer, Wuensche und Sperrzeiten uebersichtlich pro Team fest. Das System optimiert die lueckenlose Auslastung (90-Minuten-Bloecke zuerst) und erlaubt manuelle Anpassungen.")
 
