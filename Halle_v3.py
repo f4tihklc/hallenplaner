@@ -255,7 +255,7 @@ if daten_geladen:
             zeit_part = tag_zeit.split(" ", 1)[1]
             start_stunde = int(zeit_part.split('–')[0].split(':')[0])
             start_min = int(zeit_part.split('–')[0].split(':')[1])
-            is_late = start_stunde >= 19 or (start_stunde == 18 and start_min >= 30)
+            is_late = start_stunde >= 19
             
             for team in ausgewaehlte_teams:
                 if team in ["G-Jugend (Bambini)", "F2-Jugend"] and is_late:
