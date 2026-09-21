@@ -28,7 +28,7 @@ st.markdown(
 )
 
 st.title("SVT-Jugend Hallenbelegungsplaner")
-st.markdown("Lege Trainingsdauer, Wuensche und Sperrzeiten uebersichtlich pro Team fest. Das System optimiert die lueckenlose Auslastung (90-Minuten-Bloecke zuerst) und erlaubt manuelle Anpassungen.")
+st.markdown("Lege Trainingsdauer, Wuensche und Sperrzeiten uebersichtlich pro Team fest. Das System optimiert die lueckenlose Auslastung (laengste Bloecke zuerst) und erlaubt manuelle Anpassungen.")
 
 alle_jugenden = ["G-Jugend (Bambini)", "F2-Jugend", "F1-Jugend", "E-Jugend", "D-Jugend"]
 
@@ -113,7 +113,7 @@ def check_valid(tag, zeit, dauer, team, plan, team_tage, wunsch_daten, basiszeit
     if team in ["G-Jugend (Bambini)", "F2-Jugend"]:
         start_stunde = int(kandidaten[0].split('–')[0].split(':')[0])
         start_min = int(kandidaten[0].split('–')[0].split(':')[1])
-        if start_stunde > 19:
+        if start_stunde >= 19 or (start_stunde == 18 and start_min >= 30):
             return False
             
     return True
@@ -162,7 +162,7 @@ def run_monte_carlo(basiszeiten, jugenden, durations, wunsch_daten, abstandsrege
             if durations[team]['t2'] > 0:
                 reqs.append({'team': team, 'dauer': durations[team]['t2'], 'type': 'T2', 'wishes': wunsch_daten[team]['w2']})
                 
-        # Zuerst mischen, dann nach Dauer sortieren -> 90 Min Bloecke werden zuerst gesetzt
+        # Zuerst mischen, dann nach Dauer sortieren -> Laengste Bloecke (120, dann 90) werden zuerst gesetzt
         random.shuffle(reqs)
         reqs.sort(key=lambda x: x['dauer'], reverse=True)
         
@@ -209,7 +209,8 @@ def farbe_kalender(wert):
 def optimiere_t2(ausgewaehlte_teams):
     for team in ausgewaehlte_teams:
         key = f"t2_d_{team}"
-        if st.session_state.get(key, 0) == 90:
+        # Alles was groesser als 60 Min (also 90 oder 120) ist, wird auf 60 verkuerzt
+        if st.session_state.get(key, 0) > 60:
             st.session_state[key] = 60
     st.session_state.berechnen = True
 
@@ -242,10 +243,8 @@ if daten_geladen:
         st.subheader("1. Individuelle Teameinstellungen")
         st.write("Klicke auf eine Jugend, um Dauer, Wunschzeiten und Sperren einzustellen.")
         
-        # Tabs fuer eine aufgeraeumte Darstellung
         tabs = st.tabs(ausgewaehlte_teams)
         
-        # Flache Liste aller verfuegbaren Zeiten erstellen
         alle_zeiten_flach = []
         for tag in ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag']:
             for z in basiszeiten[tag]:
@@ -256,7 +255,6 @@ if daten_geladen:
         
         for i, team in enumerate(ausgewaehlte_teams):
             with tabs[i]:
-                # Voreinstellungen abhaengig vom Team
                 if team == "G-Jugend (Bambini)":
                     def_t1, def_t2 = 60, 0
                 elif team == "F2-Jugend":
@@ -264,7 +262,6 @@ if daten_geladen:
                 else:
                     def_t1, def_t2 = 90, 90
                 
-                # Standard-Sperrzeiten fuer G und F2 generieren
                 default_sperren = []
                 if team in ["G-Jugend (Bambini)", "F2-Jugend"]:
                     for tz in alle_zeiten_flach:
@@ -274,12 +271,11 @@ if daten_geladen:
                         if h >= 19 or (h == 18 and m >= 30):
                             default_sperren.append(tz)
                 
-                # Layout innerhalb des Tabs
                 col1, col2 = st.columns(2)
                 
                 with col1:
                     st.markdown("**1. Training**")
-                    t1_val = st.selectbox("Dauer T1", options=[0, 60, 90], index=[0, 60, 90].index(def_t1), key=f"t1_d_{team}")
+                    t1_val = st.selectbox("Dauer T1", options=[0, 60, 90, 120], index=[0, 60, 90, 120].index(def_t1), key=f"t1_d_{team}")
                     w1_val = st.selectbox("Wunsch-Startzeit T1", options=["Kein Wunsch"] + alle_zeiten_flach, key=f"w1_{team}")
                     
                     if w1_val != "Kein Wunsch":
@@ -288,7 +284,7 @@ if daten_geladen:
                         
                 with col2:
                     st.markdown("**2. Training**")
-                    t2_val = st.selectbox("Dauer T2", options=[0, 60, 90], index=[0, 60, 90].index(def_t2), key=f"t2_d_{team}")
+                    t2_val = st.selectbox("Dauer T2", options=[0, 60, 90, 120], index=[0, 60, 90, 120].index(def_t2), key=f"t2_d_{team}")
                     w2_val = st.selectbox("Wunsch-Startzeit T2", options=["Kein Wunsch"] + alle_zeiten_flach, key=f"w2_{team}")
                     
                     if w2_val != "Kein Wunsch":
